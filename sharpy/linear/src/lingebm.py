@@ -162,6 +162,7 @@ class FlexDynamic():
 
         if self.Mstr.shape[0] == 6*(self.tsstruct0.num_node - 1):
             self.clamped = True
+            self.num_dof_rig = 0
         else:
             self.clamped = False
 

@@ -57,6 +57,24 @@ class FrequencyResponse(solver_interface.BaseSolver):
     settings_description['frequency_unit'] = 'Units of frequency, ``w`` for rad/s, ``k`` reduced.'
     settings_options['frequency_unit'] = ['w', 'k']
 
+    settings_types['frequency_scaling'] = 'dict'
+    settings_default['frequency_scaling'] = {}
+    settings_description['frequency_scaling'] = 'Dictionary containing the frequency scaling factors, if the ' \
+                                                'aerodynamic system has not been previously scaled. Applied also if ' \
+                                                'the desired unit is reduced frequency.'
+
+    scaling_types = dict()
+    scaling_default = dict()
+    scaling_description = dict()
+
+    scaling_types['length'] = 'float'
+    scaling_default['length'] = 1.
+    scaling_description['length'] = 'Length scaling factor.'
+
+    scaling_types['speed'] = 'float'
+    scaling_default['speed'] = 1.
+    scaling_description['speed'] = 'Speed scaling factor.'
+
     settings_types['frequency_bounds'] = 'list(float)'
     settings_default['frequency_bounds'] = [1e-3, 1]
     settings_description['frequency_bounds'] = 'Lower and upper frequency bounds in the corresponding unit.'
@@ -81,6 +99,10 @@ class FrequencyResponse(solver_interface.BaseSolver):
     settings_table = settings_utils.SettingsTable()
     __doc__ += settings_table.generate(settings_types, settings_default, settings_description, settings_options)
 
+    scaling_table = settings_utils.SettingsTable()
+    __doc__ += scaling_table.generate(scaling_types, scaling_default, scaling_description,
+                                      header_line='The scaling dictionary takes the following entries:')
+
     def __init__(self):
 
         self.settings = None
@@ -88,6 +110,7 @@ class FrequencyResponse(solver_interface.BaseSolver):
         self.folder = None
         self.print_info = False
 
+        self.scaled = False
         self.w_to_k = 1
         self.wv = None
 
@@ -105,15 +128,19 @@ class FrequencyResponse(solver_interface.BaseSolver):
 
         self.print_info = self.settings['print_info']
 
-        try:
-            scaling = self.data.linear.linear_system.uvlm.sys.ScalingFacts
-            if self.settings['frequency_unit'] == 'k':
-                self.w_to_k = scaling['length'] / scaling['speed']
+        if self.settings['frequency_unit'] == 'k':
+            self.scaled = True
+            if self.data.linear.linear_system.uvlm.scaled:
+                scaling = self.data.linear.linear_system.uvlm.sys.ScalingFacts
             else:
-                self.w_to_k = 1.
-        except AttributeError:
+                scaling = self.settings['frequency_scaling']
+                settings_utils.to_custom_types(scaling, self.scaling_types, self.scaling_default,
+                                               no_ctype=True)
+            self.w_to_k = scaling['length'] / scaling['speed']
+        else:
             self.w_to_k = 1.
 
+        # Frequency bounds in radians
         lb = self.settings['frequency_bounds'][0] / self.w_to_k
         ub = self.settings['frequency_bounds'][1] / self.w_to_k
 
@@ -181,7 +208,7 @@ class FrequencyResponse(solver_interface.BaseSolver):
             else:
                 hinf = None
 
-            self.save_freq_resp(self.wv, y_freq_fom, system_name=system_name, hinf=hinf)
+            self.save_freq_resp(self.wv * self.w_to_k, y_freq_fom, system_name=system_name, hinf=hinf)
 
             cout.cout_wrap('\tComputed the frequency response in %f s' % tfom, 2)
 
@@ -208,7 +235,7 @@ class FrequencyResponse(solver_interface.BaseSolver):
         with open(self.folder + '/freqdata_readme.txt', 'w') as outfile:
             outfile.write('Frequency Response Data Output\n\n')
             outfile.write('Frequency data found in the relevant .h5 file\n')
-            outfile.write('If the system has not been scaled, the units of frequency are rad/s\nThe frequency' \
+            outfile.write('The units of frequency are rad/s\nThe frequency' \
                           'response is given in complex form.')
 
         case_name = ''
@@ -250,7 +277,7 @@ class FrequencyResponse(solver_interface.BaseSolver):
                     if y_freq_fom is not None:
                         ax1[0].plot(self.wv * self.w_to_k, 20 * np.log10(np.abs(y_freq_fom[pj, mj, :])), color='C0')
                         ax1[1].plot(self.wv * self.w_to_k, np.angle(y_freq_fom[pj, mj, :]), '-', color='C0')
-                    if self.settings['frequency_unit'] == 'k':
+                    if self.scaled:
                         ax1[1].set_xlabel('Reduced Frequency, k [-]')
                     else:
                         ax1[1].set_xlabel(r'Frequency, $\omega$ [rad/s]')
